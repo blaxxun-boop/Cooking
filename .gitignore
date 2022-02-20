@@ -1,0 +1,6 @@
+bin
+obj
+/packages
+Cooking.sln.DotSettings.user
+.idea
+.vs
