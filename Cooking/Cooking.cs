@@ -52,19 +52,66 @@ public class Cooking : BaseUnityPlugin
 
 		ExtendedItemData.NewExtendedItemData += e =>
 		{
-			if (CheckCooking.isCooking && e.m_shared.m_food > 0 && e.m_shared.m_foodStamina > 0)
+			if (CheckCooking.cookingPlayer is not null && e.m_shared.m_food > 0 && e.m_shared.m_foodStamina > 0)
 			{
 				SaveSkill skill = e.AddComponent<SaveSkill>();
-				skill.skill = Mathf.RoundToInt(Player.m_localPlayer.GetSkillFactor(Skill.fromName("Cooking")) * 100 / 5) * 5;
+				skill.skill = Mathf.RoundToInt(CheckCooking.cookingPlayer.m_nview.GetZDO().GetFloat("Cooking Skill Factor") * 100 / 5) * 5;
 				if (Random.Range(0, 100) <= skill.skill - 50)
 				{
 					skill.happy = true;
 				}
 				skill.Apply();
-				Player.m_localPlayer.RaiseSkill("Cooking", 5f);
+				CheckCooking.cookingPlayer.m_nview.InvokeRPC("Cooking IncreaseSkill", 5f);
 			}
 		};
 		ExtendedItemData.LoadExtendedItemData += e => e.GetComponent<SaveSkill>()?.Apply();
+	}
+
+	[HarmonyPatch(typeof(Player), nameof(Player.Awake))]
+	public class PlayerAwake
+	{
+		private static void Postfix(Player __instance)
+		{
+			__instance.m_nview.Register("Cooking IncreaseSkill", (long _, int factor) => __instance.RaiseSkill("Cooking", factor));
+		}
+	}
+
+	[HarmonyPatch(typeof(Player), nameof(Player.Update))]
+	public class PlayerUpdate
+	{
+		private static void Postfix(Player __instance)
+		{
+			if (__instance == Player.m_localPlayer)
+			{
+				__instance.m_nview.GetZDO().Set("Cooking Skill Factor", __instance.GetSkillFactor(Skill.fromName("Cooking")));
+			}
+		}
+	}
+	
+	[HarmonyPatch(typeof(CookingStation), nameof(CookingStation.RPC_RemoveDoneItem))]
+	public class XPOnDoneItems
+	{
+		private static void Prefix(long sender)
+		{
+			if (Player.m_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.m_userID == sender) is Player player)
+			{
+				CheckCooking.cookingPlayer = player;
+			}
+		}
+
+		public static void Finalizer() => CheckCooking.cookingPlayer = null;
+	}
+
+	[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.DoCrafting))]
+	public class CheckCooking
+	{
+		public static Player? cookingPlayer = null;
+
+		[UsedImplicitly]
+		public static void Prefix() => cookingPlayer = Player.m_localPlayer;
+
+		[UsedImplicitly]
+		public static void Finalizer() => cookingPlayer = null;
 	}
 
 	[HarmonyPatch(typeof(Player), nameof(Player.EatFood))]
@@ -139,24 +186,6 @@ public class Cooking : BaseUnityPlugin
 				__result += "\nThis food has been cooked perfectly and will make you happy.";
 			}
 		}
-	}
-
-	[HarmonyPatch]
-	public class CheckCooking
-	{
-		public static IEnumerable<MethodBase> TargetMethods() => new[]
-		{
-			AccessTools.DeclaredMethod(typeof(InventoryGui), nameof(InventoryGui.DoCrafting)),
-			AccessTools.DeclaredMethod(typeof(CookingStation), nameof(CookingStation.SpawnItem))
-		};
-
-		public static bool isCooking = false;
-
-		[UsedImplicitly]
-		public static void Prefix() => isCooking = true;
-
-		[UsedImplicitly]
-		public static void Finalizer() => isCooking = false;
 	}
 
 	[PublicAPI]
