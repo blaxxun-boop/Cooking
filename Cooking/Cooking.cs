@@ -93,7 +93,7 @@ public class Cooking : BaseUnityPlugin
 	{
 		private static void Prefix(long sender)
 		{
-			if (Player.m_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.m_userID == sender) is Player player)
+			if (Player.m_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.m_userID == sender) is { } player)
 			{
 				CheckCooking.cookingPlayer = player;
 			}
