@@ -20,7 +20,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.0.1";
+	private const string ModVersion = "1.0.2";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static Skill cooking = null!;
@@ -29,7 +29,7 @@ public class Cooking : BaseUnityPlugin
 
 	public void Awake()
 	{
-		cooking = new("Cooking", "cooking.png");
+		cooking = new Skill("Cooking", "cooking.png");
 		cooking.Description.English("Increases health, stamina and health regen for food you cook.");
 		cooking.Name.German("Kochen");
 		cooking.Description.German("Erhöht die Lebenspunkte, Ausdauer und Lebenspunkteregeneration für von dir gekochtes Essen.");
@@ -61,7 +61,7 @@ public class Cooking : BaseUnityPlugin
 					skill.happy = true;
 				}
 				skill.Apply();
-				CheckCooking.cookingPlayer.m_nview.InvokeRPC("Cooking IncreaseSkill", 5f);
+				CheckCooking.cookingPlayer.m_nview.InvokeRPC("Cooking IncreaseSkill", 5);
 			}
 		};
 		ExtendedItemData.LoadExtendedItemData += e => e.GetComponent<SaveSkill>()?.Apply();
@@ -87,7 +87,7 @@ public class Cooking : BaseUnityPlugin
 			}
 		}
 	}
-	
+
 	[HarmonyPatch(typeof(CookingStation), nameof(CookingStation.RPC_RemoveDoneItem))]
 	public class XPOnDoneItems
 	{
@@ -99,6 +99,7 @@ public class Cooking : BaseUnityPlugin
 			}
 		}
 
+		[UsedImplicitly]
 		public static void Finalizer() => CheckCooking.cookingPlayer = null;
 	}
 
