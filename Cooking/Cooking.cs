@@ -6,9 +6,11 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.RegularExpressions;
 using BepInEx;
+using BepInEx.Configuration;
 using ExtendedItemDataFramework;
 using HarmonyLib;
 using JetBrains.Annotations;
+using ServerSync;
 using SkillManager;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -20,31 +22,95 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.0.2";
+	private const string ModVersion = "1.1.0";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
-	private static Skill cooking = null!;
+	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
 
-	private static float oldCookingEffectFactor;
+	private static ConfigEntry<Toggle> serverConfigLocked = null!;
+	private static ConfigEntry<float> healthIncreaseFactor = null!;
+	private static ConfigEntry<float> staminaIncreaseFactor = null!;
+	private static ConfigEntry<float> regenIncreaseFactor = null!;
+	private static ConfigEntry<int> happyMinimumLevel = null!;
+	private static ConfigEntry<int> happyBuffDuration = null!;
+	private static ConfigEntry<float> happyBuffStrengthFactor = null!;
+	private static ConfigEntry<float> experienceGainedFactor = null!;
+
+	private ConfigEntry<T> config<T>(string group, string name, T value, ConfigDescription description, bool synchronizedSetting = true)
+	{
+		ConfigEntry<T> configEntry = Config.Bind(group, name, value, description);
+
+		SyncedConfigEntry<T> syncedConfigEntry = configSync.AddConfigEntry(configEntry);
+		syncedConfigEntry.SynchronizedConfig = synchronizedSetting;
+
+		return configEntry;
+	}
+
+	private ConfigEntry<T> config<T>(string group, string name, T value, string description, bool synchronizedSetting = true) => config(group, name, value, new ConfigDescription(description), synchronizedSetting);
+
+	private enum Toggle
+	{
+		On = 1,
+		Off = 0
+	}
+
+	private class ConfigurationManagerAttributes
+	{
+		[UsedImplicitly] public bool? ShowRangeAsPercent;
+	}
 
 	public void Awake()
 	{
-		cooking = new Skill("Cooking", "cooking.png");
+		Skill cooking = new("Cooking", "cooking.png");
 		cooking.Description.English("Increases health, stamina and health regen for food you cook.");
 		cooking.Name.German("Kochen");
 		cooking.Description.German("Erhöht die Lebenspunkte, Ausdauer und Lebenspunkteregeneration für von dir gekochtes Essen.");
-		cooking.Configurable = true;
-		oldCookingEffectFactor = cooking.SkillEffectFactor;
-		cooking.SkillEffectFactorChanged += factor =>
+		cooking.Configurable = false;
+
+		serverConfigLocked = config("1 - General", "Lock Configuration", Toggle.On, "If on, the configuration is locked and can be changed by server admins only.");
+		configSync.AddLockingConfigEntry(serverConfigLocked);
+		healthIncreaseFactor = config("2 - Cooking", "Health Increase Factor", 2f, new ConfigDescription("Factor for the health on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		staminaIncreaseFactor = config("2 - Cooking", "Stamina Increase Factor", 2f, new ConfigDescription("Factor for the stamina on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		regenIncreaseFactor = config("2 - Cooking", "Regen Increase Factor", 2f, new ConfigDescription("Factor for the health regeneration on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		happyMinimumLevel = config("3 - Happy", "Happy Required Level", 50, new ConfigDescription("Minimum required cooking skill level for a chance to cook perfect food. 0 is disabled", new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { ShowRangeAsPercent = false }));
+		happyBuffDuration = config("3 - Happy", "Happy Buff Duration", 3, new ConfigDescription("Duration for the happy buff from eating perfectly cooked food in minutes.", new AcceptableValueRange<int>(1, 60)));
+		happyBuffStrengthFactor = config("3 - Happy", "Happy Buff Strength", 1.1f, new ConfigDescription("Factor for the movement speed with the happy buff active.", new AcceptableValueRange<float>(1f, 3f)));
+		experienceGainedFactor = config("4 - Other", "Skill Experience Gain Factor", 1f, new ConfigDescription("Factor for experience gained for the cooking skill.", new AcceptableValueRange<float>(0.01f, 5f)));
+		experienceGainedFactor.SettingChanged += (_, _) => cooking.SkillGainFactor = experienceGainedFactor.Value;
+		cooking.SkillGainFactor = experienceGainedFactor.Value;
+
+		float oldHealthIncreaseFactor = healthIncreaseFactor.Value;
+		healthIncreaseFactor.SettingChanged += (_, _) =>
 		{
-			foreach (ItemDrop.ItemData.SharedData ItemShared in SaveSkill.active)
+			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in SaveSkill.active)
 			{
-				ItemShared.m_food *= factor / oldCookingEffectFactor;
-				ItemShared.m_foodRegen *= factor / oldCookingEffectFactor;
-				ItemShared.m_foodStamina *= factor / oldCookingEffectFactor;
+				ItemShared.Key.m_food *= (1 + ItemShared.Value * (healthIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldHealthIncreaseFactor - 1) / 100);
 			}
-			oldCookingEffectFactor = factor;
+			oldHealthIncreaseFactor = healthIncreaseFactor.Value;
 		};
+
+		float oldStaminaIncreaseFactor = staminaIncreaseFactor.Value;
+		staminaIncreaseFactor.SettingChanged += (_, _) =>
+		{
+			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in SaveSkill.active)
+			{
+				ItemShared.Key.m_foodStamina *= (1 + ItemShared.Value * (staminaIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldStaminaIncreaseFactor - 1) / 100);
+			}
+			oldStaminaIncreaseFactor = staminaIncreaseFactor.Value;
+		};
+
+		float oldRegenIncreaseFactor = regenIncreaseFactor.Value;
+		regenIncreaseFactor.SettingChanged += (_, _) =>
+		{
+			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in SaveSkill.active)
+			{
+				ItemShared.Key.m_foodRegen *= (1 + ItemShared.Value * (regenIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldRegenIncreaseFactor - 1) / 100);
+			}
+			oldRegenIncreaseFactor = regenIncreaseFactor.Value;
+		};
+
+		happyBuffDuration.SettingChanged += (_, _) => AddStatusEffect.SetValues();
+		happyBuffStrengthFactor.SettingChanged += (_, _) => AddStatusEffect.SetValues();
 
 		Assembly assembly = Assembly.GetExecutingAssembly();
 		Harmony harmony = new(ModGUID);
@@ -56,7 +122,7 @@ public class Cooking : BaseUnityPlugin
 			{
 				SaveSkill skill = e.AddComponent<SaveSkill>();
 				skill.skill = Mathf.RoundToInt(CheckCooking.cookingPlayer.m_nview.GetZDO().GetFloat("Cooking Skill Factor") * 100 / 5) * 5;
-				if (Random.Range(0, 100) <= skill.skill - 50)
+				if (happyMinimumLevel.Value > 0 && Random.Range(0, 100) <= skill.skill - happyMinimumLevel.Value)
 				{
 					skill.happy = true;
 				}
@@ -130,15 +196,25 @@ public class Cooking : BaseUnityPlugin
 	[HarmonyPatch(typeof(ObjectDB), nameof(ObjectDB.Awake))]
 	public class AddStatusEffect
 	{
+		private static StatusEffect? happy;
+
 		private static void Postfix(ObjectDB __instance)
 		{
-			StatusEffect happy = ScriptableObject.CreateInstance<IncreaseMovementSpeed>();
+			happy = ScriptableObject.CreateInstance<IncreaseMovementSpeed>();
 			happy.name = "Happy";
 			happy.m_name = "Happy";
-			happy.m_tooltip = "You ate a perfect meal. Your movement speed is increased by 10%.";
-			happy.m_ttl = 180f;
 			happy.m_icon = loadSprite("happy.png", 64, 64);
+			SetValues();
 			__instance.m_StatusEffects.Add(happy);
+		}
+
+		public static void SetValues()
+		{
+			if (happy is not null)
+			{
+				happy.m_tooltip = $"You ate a perfect meal. Your movement speed is increased by {(happyBuffStrengthFactor.Value - 1) * 100}%.";
+				happy.m_ttl = happyBuffDuration.Value * 60f;
+			}
 		}
 	}
 
@@ -162,7 +238,7 @@ public class Cooking : BaseUnityPlugin
 	{
 		public override void ModifySpeed(float baseSpeed, ref float speed)
 		{
-			speed *= 1.1f;
+			speed *= happyBuffStrengthFactor.Value;
 		}
 	}
 
@@ -174,12 +250,12 @@ public class Cooking : BaseUnityPlugin
 		{
 			if (crafting && item.m_shared.m_food > 0 && item.m_shared.m_foodStamina > 0)
 			{
-				float skill = Mathf.RoundToInt(Player.m_localPlayer.GetSkillFactor(Skill.fromName("Cooking")) * 100 / 5) * 5f / 100 * cooking.SkillEffectFactor;
+				float skill = Mathf.RoundToInt(Player.m_localPlayer.GetSkillFactor(Skill.fromName("Cooking")) * 100 / 5) * 5f / 100;
 				if (skill > 0)
 				{
-					__result = new Regex("(\\$item_food_health.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_food)}</color>)");
-					__result = new Regex("(\\$item_food_stamina.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodStamina)}</color>)");
-					__result = new Regex("(\\$item_food_regen.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodRegen)}</color>)");
+					__result = new Regex("(\\$item_food_health.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_food * (healthIncreaseFactor.Value - 1))}</color>)");
+					__result = new Regex("(\\$item_food_stamina.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodStamina * (staminaIncreaseFactor.Value - 1))}</color>)");
+					__result = new Regex("(\\$item_food_regen.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodRegen * (regenIncreaseFactor.Value - 1))}</color>)");
 				}
 			}
 			if (!crafting && item.Extended()?.GetComponent<SaveSkill>()?.happy == true)
@@ -187,18 +263,46 @@ public class Cooking : BaseUnityPlugin
 				__result += "\nThis food has been cooked perfectly and will make you happy.";
 			}
 		}
+
+		[UsedImplicitly]
+		public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+		{
+			FieldInfo food = AccessTools.DeclaredField(typeof(ItemDrop.ItemData.SharedData), nameof(ItemDrop.ItemData.SharedData.m_food));
+			FieldInfo foodStamina = AccessTools.DeclaredField(typeof(ItemDrop.ItemData.SharedData), nameof(ItemDrop.ItemData.SharedData.m_foodStamina));
+			FieldInfo foodRegen = AccessTools.DeclaredField(typeof(ItemDrop.ItemData.SharedData), nameof(ItemDrop.ItemData.SharedData.m_foodRegen));
+
+			foreach (CodeInstruction instruction in instructions)
+			{
+				yield return instruction;
+				if (instruction.opcode == OpCodes.Ldfld && (instruction.OperandIs(food) || instruction.OperandIs(foodStamina) || instruction.OperandIs(foodRegen)))
+				{
+					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(Mathf), nameof(Mathf.Round)));
+				}
+			}
+		}
 	}
 
 	[PublicAPI]
 	public class SaveSkill : BaseExtendedItemComponent, ExtendedItemUnique<SaveSkill>
 	{
-		public static readonly HashSet<ItemDrop.ItemData.SharedData> active = new();
-		public int skill;
+		public static readonly Dictionary<ItemDrop.ItemData.SharedData, int> active = new();
+		private int _skill;
+
+		public int skill
+		{
+			get => _skill;
+			set
+			{
+				_skill = value;
+				active[ItemData.m_shared] = value;
+			}
+		}
+
 		public bool happy = false;
 
 		public SaveSkill(ExtendedItemData parent) : base(typeof(SaveSkill).AssemblyQualifiedName, parent)
 		{
-			active.Add(ItemData.m_shared);
+			active[ItemData.m_shared] = 0;
 		}
 
 		public override string Serialize() => (happy ? "1" : "0") + skill;
@@ -208,7 +312,8 @@ public class Cooking : BaseUnityPlugin
 			if (data.Length > 0)
 			{
 				happy = data[0] == '1';
-				int.TryParse(data.Substring(1), out skill);
+				int.TryParse(data.Substring(1), out int skillValue);
+				skill = skillValue;
 			}
 		}
 
@@ -216,9 +321,9 @@ public class Cooking : BaseUnityPlugin
 
 		public void Apply()
 		{
-			ItemData.m_shared.m_food *= 1 + skill * cooking.SkillEffectFactor / 100;
-			ItemData.m_shared.m_foodStamina *= 1 + skill * cooking.SkillEffectFactor / 100;
-			ItemData.m_shared.m_foodRegen *= 1 + skill * cooking.SkillEffectFactor / 100;
+			ItemData.m_shared.m_food *= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
+			ItemData.m_shared.m_foodStamina *= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
+			ItemData.m_shared.m_foodRegen *= 1 + skill * (regenIncreaseFactor.Value - 1) / 100;
 		}
 
 		public bool Equals(SaveSkill other) => skill == other.skill && happy == other.happy;
