@@ -22,7 +22,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.0";
+	private const string ModVersion = "1.1.1";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -277,6 +277,43 @@ public class Cooking : BaseUnityPlugin
 				if (instruction.opcode == OpCodes.Ldfld && (instruction.OperandIs(food) || instruction.OperandIs(foodStamina) || instruction.OperandIs(foodRegen)))
 				{
 					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(Mathf), nameof(Mathf.Round)));
+				}
+			}
+		}
+	}
+
+	[HarmonyPatch(typeof(Player), nameof(Player.Save))]
+	public class SaveFoodBonus
+	{
+		[UsedImplicitly]
+		public static void Prefix(Player __instance)
+		{
+			foreach (Player.Food food in __instance.m_foods)
+			{
+				__instance.m_knownStations["Cooking Skill " + food.m_name] = food.m_item.Extended()?.GetComponent<SaveSkill>()?.skill ?? 0;
+			}
+		}
+	}
+
+	[HarmonyPatch(typeof(Player), nameof(Player.Load))]
+	public class LoadFoodBonus
+	{
+		[UsedImplicitly]
+		public static void Postfix(Player __instance)
+		{
+			foreach (Player.Food food in __instance.m_foods)
+			{
+				if (__instance.m_knownStations.TryGetValue("Cooking Skill " + food.m_name, out int skillLevel) && skillLevel > 0)
+				{
+					if (!food.m_item.IsExtended())
+					{
+						food.m_item = new ExtendedItemData(food.m_item);
+					}
+					food.m_item.m_shared = (ItemDrop.ItemData.SharedData)AccessTools.Method(typeof(ItemDrop.ItemData.SharedData), "MemberwiseClone").Invoke(food.m_item.m_shared, Array.Empty<object>());
+
+					SaveSkill skill = food.m_item.Extended().AddComponent<SaveSkill>();
+					skill.skill = skillLevel;
+					skill.Apply();
 				}
 			}
 		}
