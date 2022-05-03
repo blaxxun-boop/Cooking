@@ -22,7 +22,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.1";
+	private const string ModVersion = "1.1.2";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -336,6 +336,7 @@ public class Cooking : BaseUnityPlugin
 		}
 
 		public bool happy = false;
+		private bool applied = false;
 
 		public SaveSkill(ExtendedItemData parent) : base(typeof(SaveSkill).AssemblyQualifiedName, parent)
 		{
@@ -358,6 +359,12 @@ public class Cooking : BaseUnityPlugin
 
 		public void Apply()
 		{
+			if (applied)
+			{
+				return;
+			}
+			
+			applied = true;
 			ItemData.m_shared.m_food *= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
 			ItemData.m_shared.m_foodStamina *= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
 			ItemData.m_shared.m_foodRegen *= 1 + skill * (regenIncreaseFactor.Value - 1) / 100;
