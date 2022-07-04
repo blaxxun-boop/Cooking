@@ -22,7 +22,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.2";
+	private const string ModVersion = "1.1.3";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -309,7 +309,6 @@ public class Cooking : BaseUnityPlugin
 					{
 						food.m_item = new ExtendedItemData(food.m_item);
 					}
-					food.m_item.m_shared = (ItemDrop.ItemData.SharedData)AccessTools.Method(typeof(ItemDrop.ItemData.SharedData), "MemberwiseClone").Invoke(food.m_item.m_shared, Array.Empty<object>());
 
 					SaveSkill skill = food.m_item.Extended().AddComponent<SaveSkill>();
 					skill.skill = skillLevel;
@@ -340,6 +339,7 @@ public class Cooking : BaseUnityPlugin
 
 		public SaveSkill(ExtendedItemData parent) : base(typeof(SaveSkill).AssemblyQualifiedName, parent)
 		{
+			ItemData.m_shared = (ItemDrop.ItemData.SharedData)AccessTools.Method(typeof(ItemDrop.ItemData.SharedData), "MemberwiseClone").Invoke(ItemData.m_shared, Array.Empty<object>());
 			active[ItemData.m_shared] = 0;
 		}
 
@@ -363,7 +363,7 @@ public class Cooking : BaseUnityPlugin
 			{
 				return;
 			}
-			
+
 			applied = true;
 			ItemData.m_shared.m_food *= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
 			ItemData.m_shared.m_foodStamina *= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
