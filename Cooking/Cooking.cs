@@ -7,8 +7,8 @@ using System.Reflection.Emit;
 using System.Text.RegularExpressions;
 using BepInEx;
 using BepInEx.Configuration;
-using ExtendedItemDataFramework;
 using HarmonyLib;
+using ItemDataManager;
 using JetBrains.Annotations;
 using ServerSync;
 using SkillManager;
@@ -18,11 +18,10 @@ using Random = UnityEngine.Random;
 namespace Cooking;
 
 [BepInPlugin(ModGUID, ModName, ModVersion)]
-[BepInDependency("randyknapp.mods.extendeditemdataframework")]
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.5";
+	private const string ModVersion = "1.1.6";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -82,7 +81,7 @@ public class Cooking : BaseUnityPlugin
 		float oldHealthIncreaseFactor = healthIncreaseFactor.Value;
 		healthIncreaseFactor.SettingChanged += (_, _) =>
 		{
-			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in SaveSkill.active)
+			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in CookingSkill.active)
 			{
 				ItemShared.Key.m_food *= (1 + ItemShared.Value * (healthIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldHealthIncreaseFactor - 1) / 100);
 			}
@@ -92,7 +91,7 @@ public class Cooking : BaseUnityPlugin
 		float oldStaminaIncreaseFactor = staminaIncreaseFactor.Value;
 		staminaIncreaseFactor.SettingChanged += (_, _) =>
 		{
-			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in SaveSkill.active)
+			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in CookingSkill.active)
 			{
 				ItemShared.Key.m_foodStamina *= (1 + ItemShared.Value * (staminaIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldStaminaIncreaseFactor - 1) / 100);
 			}
@@ -102,7 +101,7 @@ public class Cooking : BaseUnityPlugin
 		float oldRegenIncreaseFactor = regenIncreaseFactor.Value;
 		regenIncreaseFactor.SettingChanged += (_, _) =>
 		{
-			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in SaveSkill.active)
+			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in CookingSkill.active)
 			{
 				ItemShared.Key.m_foodRegen *= (1 + ItemShared.Value * (regenIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldRegenIncreaseFactor - 1) / 100);
 			}
@@ -116,21 +115,7 @@ public class Cooking : BaseUnityPlugin
 		Harmony harmony = new(ModGUID);
 		harmony.PatchAll(assembly);
 
-		ExtendedItemData.NewExtendedItemData += e =>
-		{
-			if (CheckCooking.cookingPlayer is not null && e.m_shared.m_food > 0 && e.m_shared.m_foodStamina > 0)
-			{
-				SaveSkill skill = e.AddComponent<SaveSkill>();
-				skill.skill = Mathf.RoundToInt(CheckCooking.cookingPlayer.m_nview.GetZDO().GetFloat("Cooking Skill Factor") * 100 / 5) * 5;
-				if (happyMinimumLevel.Value > 0 && Random.Range(0, 100) <= skill.skill - happyMinimumLevel.Value)
-				{
-					skill.happy = true;
-				}
-				skill.Apply();
-				CheckCooking.cookingPlayer.m_nview.InvokeRPC("Cooking IncreaseSkill", 5);
-			}
-		};
-		ExtendedItemData.LoadExtendedItemData += e => e.GetComponent<SaveSkill>()?.Apply();
+		ItemInfo.ForceLoadTypes.Add(typeof(CookingSkill));
 	}
 
 	[HarmonyPatch(typeof(Player), nameof(Player.Awake))]
@@ -155,30 +140,72 @@ public class Cooking : BaseUnityPlugin
 	}
 
 	[HarmonyPatch(typeof(CookingStation), nameof(CookingStation.RPC_RemoveDoneItem))]
-	public class XPOnDoneItems
+	public class OnCookingDoneItems
 	{
+		public static Player? cookingPlayer;
+
 		private static void Prefix(long sender)
 		{
 			if (Player.m_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.m_userID == sender) is { } player)
 			{
-				CheckCooking.cookingPlayer = player;
+				cookingPlayer = player;
 			}
 		}
 
 		[UsedImplicitly]
-		public static void Finalizer() => CheckCooking.cookingPlayer = null;
+		public static void Finalizer() => cookingPlayer = null;
+	}
+
+	private static void AttachCooking(ItemDrop item, Player cook)
+	{
+		if (item.m_itemData.m_shared.m_food > 0 && item.m_itemData.m_shared.m_foodStamina > 0)
+		{
+			CookingSkill skill = item.m_itemData.Data().Add<CookingSkill>()!;
+			skill.skill = Mathf.RoundToInt(cook.m_nview.GetZDO().GetFloat("Cooking Skill Factor") * 100 / 5) * 5;
+			if (happyMinimumLevel.Value > 0 && Random.Range(0, 100) <= skill.skill - happyMinimumLevel.Value)
+			{
+				skill.happy = true;
+			}
+
+			skill.Save();
+			skill.Load();
+		}
+	}
+
+	[HarmonyPatch(typeof(CookingStation), nameof(CookingStation.SpawnItem))]
+	public class XPOnDoneItems
+	{
+		private static void Prefix(string name, out ItemDrop __state)
+		{
+			__state = ObjectDB.instance.GetItemPrefab(name).GetComponent<ItemDrop>();
+			// ReSharper disable once Unity.NoNullCoalescing
+			AttachCooking(__state, OnCookingDoneItems.cookingPlayer ?? Player.m_localPlayer);
+			OnCookingDoneItems.cookingPlayer?.m_nview.InvokeRPC("Cooking IncreaseSkill", 5);
+		}
+
+		private static void Finalizer(ItemDrop __state)
+		{
+			__state.m_itemData.Data().Remove<CookingSkill>();
+		}
 	}
 
 	[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.DoCrafting))]
 	public class CheckCooking
 	{
-		public static Player? cookingPlayer = null;
+		[UsedImplicitly]
+		public static void Prefix(InventoryGui __instance)
+		{
+			if (__instance.m_craftRecipe is not null)
+			{
+				AttachCooking(__instance.m_craftRecipe.m_item, Player.m_localPlayer);
+			}
+		}
 
 		[UsedImplicitly]
-		public static void Prefix() => cookingPlayer = Player.m_localPlayer;
-
-		[UsedImplicitly]
-		public static void Finalizer() => cookingPlayer = null;
+		public static void Finalizer(InventoryGui __instance)
+		{
+			__instance.m_craftRecipe?.m_item.m_itemData.Data().Remove<CookingSkill>();
+		}
 	}
 
 	[HarmonyPatch(typeof(Player), nameof(Player.EatFood))]
@@ -186,7 +213,7 @@ public class Cooking : BaseUnityPlugin
 	{
 		private static void Postfix(Player __instance, ItemDrop.ItemData item, bool __result)
 		{
-			if (item.Extended()?.GetComponent<SaveSkill>()?.happy == true && __result)
+			if (item.Data().Get<CookingSkill>()?.happy == true && __result)
 			{
 				__instance.GetSEMan().AddStatusEffect("Happy");
 			}
@@ -258,7 +285,7 @@ public class Cooking : BaseUnityPlugin
 					__result = new Regex("(\\$item_food_regen.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodRegen * (regenIncreaseFactor.Value - 1))}</color>)");
 				}
 			}
-			if (!crafting && item.Extended()?.GetComponent<SaveSkill>()?.happy == true)
+			if (!crafting && item.Data().Get<CookingSkill>()?.happy == true)
 			{
 				__result += "\nThis food has been cooked perfectly and will make you happy.";
 			}
@@ -290,7 +317,7 @@ public class Cooking : BaseUnityPlugin
 		{
 			foreach (Player.Food food in __instance.m_foods)
 			{
-				__instance.m_knownStations["Cooking Skill " + food.m_name] = food.m_item.Extended()?.GetComponent<SaveSkill>()?.skill ?? 0;
+				__instance.m_knownStations["Cooking Skill " + food.m_name] = food.m_item.Data().Get<CookingSkill>()?.skill ?? 0;
 			}
 		}
 	}
@@ -305,208 +332,81 @@ public class Cooking : BaseUnityPlugin
 			{
 				if (__instance.m_knownStations.TryGetValue("Cooking Skill " + food.m_name, out int skillLevel) && skillLevel > 0)
 				{
-					if (!food.m_item.IsExtended())
-					{
-						food.m_item = new ExtendedItemData(food.m_item);
-					}
-
-					SaveSkill skill = food.m_item.Extended().AddComponent<SaveSkill>();
-					skill.skill = skillLevel;
-					skill.Apply();
+					CookingSkill cooking = food.m_item.Data().Add<CookingSkill>()!;
+					cooking.Value = "0" + skillLevel;
+					cooking.Load();
 				}
 			}
 		}
 	}
 
-	[PublicAPI]
-	public class SaveSkill : BaseExtendedItemComponent, ExtendedItemUnique<SaveSkill>
+	[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.DoCrafting))]
+	public class IncreaseCraftingSkill
 	{
-		public static readonly Dictionary<ItemDrop.ItemData.SharedData, int> active = new();
-		private int _skill;
-
-		public int skill
+		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
 		{
-			get => _skill;
-			set
+			FieldInfo craftsField = AccessTools.DeclaredField(typeof(PlayerProfile.PlayerStats), nameof(PlayerProfile.PlayerStats.m_crafts));
+			foreach (CodeInstruction instruction in instructions)
 			{
-				_skill = value;
-				active[ItemData.m_shared] = value;
+				yield return instruction;
+				if (instruction.opcode == OpCodes.Stfld && instruction.OperandIs(craftsField))
+				{
+					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(IncreaseCraftingSkill), nameof(CheckCookingIncrease)));
+				}
 			}
 		}
 
-		public bool happy = false;
-		private bool applied = false;
-
-		public SaveSkill(ExtendedItemData parent) : base(typeof(SaveSkill).AssemblyQualifiedName, parent)
+		private static void CheckCookingIncrease()
 		{
-			ItemData.m_shared = (ItemDrop.ItemData.SharedData)AccessTools.Method(typeof(ItemDrop.ItemData.SharedData), "MemberwiseClone").Invoke(ItemData.m_shared, Array.Empty<object>());
-			active[ItemData.m_shared] = 0;
+			if (InventoryGui.instance.m_craftRecipe.m_item.m_itemData.Data().Get<CookingSkill>() is not null)
+			{
+				Player.m_localPlayer.RaiseSkill("Cooking", 5f);
+			}
+		}
+	}
+
+	private class CookingSkill : ItemData
+	{
+		public static readonly Dictionary<ItemDrop.ItemData.SharedData, int> active = new();
+
+		public bool happy = false;
+		public int skill = 0;
+
+		~CookingSkill() => active.Remove(Item.m_shared);
+
+		public override void Save()
+		{
+			Value = (happy ? "1" : "0") + skill;
 		}
 
-		public override string Serialize() => (happy ? "1" : "0") + skill;
-
-		public override void Deserialize(string data)
+		public override void Load()
 		{
+			string data = Value;
+			active[Item.m_shared] = skill;
+
 			if (data.Length > 0)
 			{
 				happy = data[0] == '1';
 				int.TryParse(data.Substring(1), out int skillValue);
 				skill = skillValue;
 			}
-		}
 
-		public override BaseExtendedItemComponent Clone() => (BaseExtendedItemComponent)MemberwiseClone();
-
-		public void Apply()
-		{
-			if (applied)
+			if (!IsCloned)
 			{
-				return;
-			}
-
-			applied = true;
-			ItemData.m_shared.m_food *= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
-			ItemData.m_shared.m_foodStamina *= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
-			ItemData.m_shared.m_foodRegen *= 1 + skill * (regenIncreaseFactor.Value - 1) / 100;
-		}
-
-		public bool Equals(SaveSkill other) => skill == other.skill && happy == other.happy;
-
-		~SaveSkill()
-		{
-			active.Remove(ItemData.m_shared);
-		}
-	}
-
-	[PublicAPI]
-	public interface ExtendedItemUnique<in T> where T : BaseExtendedItemComponent
-	{
-		public bool Equals(T obj);
-	}
-
-	public static bool IsExtendedStackable(ItemDrop.ItemData? a, ItemDrop.ItemData? b)
-	{
-		if (a?.IsExtended() != true && b?.IsExtended() != true)
-		{
-			return true;
-		}
-
-		bool IsExtendedUniqueType(Type i) => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ExtendedItemUnique<>);
-
-		if (b?.IsExtended() != true)
-		{
-			return a?.Extended().Components.Any(c => c.GetType().GetInterfaces().Any(IsExtendedUniqueType)) != true;
-		}
-		if (a.IsExtended() != true)
-		{
-			return b.Extended().Components.Any(c => c.GetType().GetInterfaces().Any(IsExtendedUniqueType)) != true;
-		}
-
-		Dictionary<Type, object> extendedUniques = a.Extended().Components.SelectMany(c =>
-		{
-			if (c.GetType().GetInterfaces().FirstOrDefault(IsExtendedUniqueType) is { } uniqueType)
-			{
-				return new[] { new KeyValuePair<Type, object>(uniqueType, c) };
-			}
-
-			return Enumerable.Empty<KeyValuePair<Type, object>>();
-		}).ToDictionary(kv => kv.Key, kv => kv.Value);
-
-		foreach (BaseExtendedItemComponent component in b.Extended().Components)
-		{
-			if (component.GetType().GetInterfaces().FirstOrDefault(IsExtendedUniqueType) is { } uniqueType)
-			{
-				if (extendedUniques.TryGetValue(uniqueType, out object other))
-				{
-					if (!(bool)uniqueType.GetMethod("Equals")!.Invoke(component, new[] { other }))
-					{
-						return false;
-					}
-
-					extendedUniques.Remove(uniqueType);
-				}
-				else
-				{
-					return false;
-				}
+				Item.m_shared.m_food *= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
+				Item.m_shared.m_foodStamina *= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
+				Item.m_shared.m_foodRegen *= 1 + skill * (regenIncreaseFactor.Value - 1) / 100;
 			}
 		}
 
-		// All Unique components present in a were also present in b
-		return extendedUniques.Count == 0;
-	}
-
-	[HarmonyPatch]
-	public class CheckExtendedUniqueCanAddItem
-	{
-		private static IEnumerable<MethodBase> TargetMethods() => new[]
+		public override void Unload()
 		{
-			AccessTools.DeclaredMethod(typeof(Inventory), nameof(Inventory.CanAddItem), new[] { typeof(ItemDrop.ItemData), typeof(int) }),
-			AccessTools.DeclaredMethod(typeof(Inventory), nameof(Inventory.AddItem), new[] { typeof(ItemDrop.ItemData) }),
-		};
-
-		private static void Prefix(ItemDrop.ItemData item) => CheckExtendedUniqueFindFreeStack.CheckingFor = item;
-		private static void Finalizer() => CheckExtendedUniqueFindFreeStack.CheckingFor = null;
-	}
-
-	[HarmonyPatch]
-	public class CheckExtendedUniqueFindFreeStack
-	{
-		public static ItemDrop.ItemData? CheckingFor;
-
-		private static IEnumerable<MethodBase> TargetMethods() => new[]
-		{
-			AccessTools.DeclaredMethod(typeof(Inventory), nameof(Inventory.FindFreeStackSpace)),
-			AccessTools.DeclaredMethod(typeof(Inventory), nameof(Inventory.FindFreeStackItem))
-		};
-
-		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionsEnumerable)
-		{
-			CodeInstruction[] instructions = instructionsEnumerable.ToArray();
-			Label target = (Label)instructions.First(i => i.opcode == OpCodes.Br || i.opcode == OpCodes.Br_S).operand;
-			CodeInstruction targetedInstr = instructions.First(i => i.labels.Contains(target));
-			CodeInstruction lastBranch = instructions.Reverse().First(i => i.Branches(out Label? label) && targetedInstr.labels.Contains(label!.Value));
-			CodeInstruction? loadingInstruction = null;
-
-			for (int i = 0; i < instructions.Length; ++i)
-			{
-				yield return instructions[i];
-				// get hold of the loop variable store (the itemdata we want to compare against)
-				if (loadingInstruction == null && instructions[i].opcode == OpCodes.Call && ((MethodInfo)instructions[i].operand).Name == "get_Current")
-				{
-					loadingInstruction = instructions[i + 1].Clone();
-					loadingInstruction.opcode = new Dictionary<OpCode, OpCode>
-					{
-						{ OpCodes.Stloc_0, OpCodes.Ldloc_0 },
-						{ OpCodes.Stloc_1, OpCodes.Ldloc_1 },
-						{ OpCodes.Stloc_2, OpCodes.Ldloc_2 },
-						{ OpCodes.Stloc_3, OpCodes.Ldloc_3 },
-						{ OpCodes.Stloc_S, OpCodes.Ldloc_S }
-					}[loadingInstruction.opcode];
-				}
-				if (instructions[i] == lastBranch)
-				{
-					yield return loadingInstruction!;
-					yield return new CodeInstruction(OpCodes.Ldsfld, AccessTools.DeclaredField(typeof(CheckExtendedUniqueFindFreeStack), nameof(CheckingFor)));
-					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(Cooking), nameof(IsExtendedStackable)));
-					yield return new CodeInstruction(OpCodes.Brfalse, target);
-				}
-			}
+			Item.m_shared = (ItemDrop.ItemData.SharedData)AccessTools.DeclaredMethod(typeof(object), "MemberwiseClone").Invoke(Item.m_shared, Array.Empty<object>());
+			Item.m_shared.m_food /= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
+			Item.m_shared.m_foodStamina /= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
+			Item.m_shared.m_foodRegen /= 1 + skill * (regenIncreaseFactor.Value - 1) / 100;
 		}
-	}
 
-	[HarmonyPatch(typeof(Inventory), nameof(Inventory.AddItem), typeof(ItemDrop.ItemData), typeof(int), typeof(int), typeof(int))]
-	public class CheckExtendedUniqueAddItem
-	{
-		private static bool Prefix(Inventory __instance, ItemDrop.ItemData item, int x, int y, ref bool __result)
-		{
-			if (__instance.GetItemAt(x, y) is { } itemAt && !Cooking.IsExtendedStackable(itemAt, item))
-			{
-				__result = false;
-				return false;
-			}
-
-			return true;
-		}
+		protected override bool AllowStackingIdenticalValues { get; set; } = true;
 	}
 }

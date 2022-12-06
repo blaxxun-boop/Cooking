@@ -67,8 +67,8 @@
         <Reference Include="BepInEx, Version=5.4.19.0, Culture=neutral, PublicKeyToken=null">
             <HintPath>$(GamePath)\BepInEx\core\BepInEx.dll</HintPath>
         </Reference>
-        <Reference Include="ExtendedItemDataFramework, Version=1.0.7.0, Culture=neutral, PublicKeyToken=null">
-            <HintPath>$(GamePath)\BepInEx\plugins\ExtendedItemDataFramework.dll</HintPath>
+        <Reference Include="ItemDataManager">
+            <HintPath>Libs\ItemDataManager.dll</HintPath>
         </Reference>
         <Reference Include="ServerSync, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
             <HintPath>Libs\ServerSync.dll</HintPath>
@@ -98,6 +98,7 @@
         <EmbeddedResource Include="icons\cooking.png"/>
         <EmbeddedResource Include="icons\happy.png"/>
         <Content Include="ILRepack.targets"/>
+        <Content Include="Libs\ItemDataManager.dll"/>
         <Content Include="Libs\ServerSync.dll">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
