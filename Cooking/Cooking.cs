@@ -21,7 +21,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.7";
+	private const string ModVersion = "1.1.8";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -332,6 +332,7 @@ public class Cooking : BaseUnityPlugin
 			{
 				if (__instance.m_knownStations.TryGetValue("Cooking Skill " + food.m_name, out int skillLevel) && skillLevel > 0)
 				{
+					food.m_item.m_shared = (ItemDrop.ItemData.SharedData)AccessTools.DeclaredMethod(typeof(object), "MemberwiseClone").Invoke(food.m_item.m_shared, Array.Empty<object>());
 					CookingSkill cooking = food.m_item.Data().Add<CookingSkill>()!;
 					cooking.Value = "0" + skillLevel;
 					cooking.Load();
