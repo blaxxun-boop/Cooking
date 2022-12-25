@@ -21,7 +21,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.8";
+	private const string ModVersion = "1.1.9";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -30,6 +30,7 @@ public class Cooking : BaseUnityPlugin
 	private static ConfigEntry<float> healthIncreaseFactor = null!;
 	private static ConfigEntry<float> staminaIncreaseFactor = null!;
 	private static ConfigEntry<float> regenIncreaseFactor = null!;
+	private static ConfigEntry<float> eitrIncreaseFactor = null!;
 	private static ConfigEntry<int> happyMinimumLevel = null!;
 	private static ConfigEntry<int> happyBuffDuration = null!;
 	private static ConfigEntry<float> happyBuffStrengthFactor = null!;
@@ -71,6 +72,7 @@ public class Cooking : BaseUnityPlugin
 		healthIncreaseFactor = config("2 - Cooking", "Health Increase Factor", 1.5f, new ConfigDescription("Factor for the health on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
 		staminaIncreaseFactor = config("2 - Cooking", "Stamina Increase Factor", 1.5f, new ConfigDescription("Factor for the stamina on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
 		regenIncreaseFactor = config("2 - Cooking", "Regen Increase Factor", 1.5f, new ConfigDescription("Factor for the health regeneration on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		eitrIncreaseFactor = config("2 - Cooking", "Eitr Increase Factor", 1.5f, new ConfigDescription("Factor for the eitr on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
 		happyMinimumLevel = config("3 - Happy", "Happy Required Level", 50, new ConfigDescription("Minimum required cooking skill level for a chance to cook perfect food. 0 is disabled", new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { ShowRangeAsPercent = false }));
 		happyBuffDuration = config("3 - Happy", "Happy Buff Duration", 3, new ConfigDescription("Duration for the happy buff from eating perfectly cooked food in minutes.", new AcceptableValueRange<int>(1, 60)));
 		happyBuffStrengthFactor = config("3 - Happy", "Happy Buff Strength", 1.1f, new ConfigDescription("Factor for the movement speed with the happy buff active.", new AcceptableValueRange<float>(1f, 3f)));
@@ -106,6 +108,16 @@ public class Cooking : BaseUnityPlugin
 				ItemShared.Key.m_foodRegen *= (1 + ItemShared.Value * (regenIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldRegenIncreaseFactor - 1) / 100);
 			}
 			oldRegenIncreaseFactor = regenIncreaseFactor.Value;
+		};
+
+		float oldEitrIncreaseFactor = eitrIncreaseFactor.Value;
+		eitrIncreaseFactor.SettingChanged += (_, _) =>
+		{
+			foreach (KeyValuePair<ItemDrop.ItemData.SharedData, int> ItemShared in CookingSkill.active)
+			{
+				ItemShared.Key.m_foodEitr *= (1 + ItemShared.Value * (eitrIncreaseFactor.Value - 1) / 100) / (1 + ItemShared.Value * (oldEitrIncreaseFactor - 1) / 100);
+			}
+			oldEitrIncreaseFactor = eitrIncreaseFactor.Value;
 		};
 
 		happyBuffDuration.SettingChanged += (_, _) => AddStatusEffect.SetValues();
@@ -283,6 +295,10 @@ public class Cooking : BaseUnityPlugin
 					__result = new Regex("(\\$item_food_health.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_food * (healthIncreaseFactor.Value - 1))}</color>)");
 					__result = new Regex("(\\$item_food_stamina.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodStamina * (staminaIncreaseFactor.Value - 1))}</color>)");
 					__result = new Regex("(\\$item_food_regen.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodRegen * (regenIncreaseFactor.Value - 1))}</color>)");
+					if (item.m_shared.m_foodEitr > 0)
+					{
+						__result = new Regex("(\\$item_food_eitr.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodEitr * (eitrIncreaseFactor.Value - 1))}</color>)");
+					}
 				}
 			}
 			if (!crafting && item.Data().Get<CookingSkill>()?.happy == true)
@@ -397,6 +413,10 @@ public class Cooking : BaseUnityPlugin
 				Item.m_shared.m_food *= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
 				Item.m_shared.m_foodStamina *= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
 				Item.m_shared.m_foodRegen *= 1 + skill * (regenIncreaseFactor.Value - 1) / 100;
+				if (Item.m_shared.m_foodEitr > 0)
+				{
+					Item.m_shared.m_foodEitr *= 1 + skill * (eitrIncreaseFactor.Value - 1) / 100;
+				}
 			}
 		}
 
@@ -406,6 +426,10 @@ public class Cooking : BaseUnityPlugin
 			Item.m_shared.m_food /= 1 + skill * (healthIncreaseFactor.Value - 1) / 100;
 			Item.m_shared.m_foodStamina /= 1 + skill * (staminaIncreaseFactor.Value - 1) / 100;
 			Item.m_shared.m_foodRegen /= 1 + skill * (regenIncreaseFactor.Value - 1) / 100;
+			if (Item.m_shared.m_foodEitr > 0)
+			{
+				Item.m_shared.m_foodEitr /= 1 + skill * (eitrIncreaseFactor.Value - 1) / 100;
+			}
 		}
 
 		protected override bool AllowStackingIdenticalValues { get; set; } = true;
