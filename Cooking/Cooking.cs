@@ -18,10 +18,11 @@ using Random = UnityEngine.Random;
 namespace Cooking;
 
 [BepInPlugin(ModGUID, ModName, ModVersion)]
+[BepInIncompatibility("randyknapp.mods.extendeditemdataframework")]
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.10";
+	private const string ModVersion = "1.1.11";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -35,6 +36,7 @@ public class Cooking : BaseUnityPlugin
 	private static ConfigEntry<int> happyBuffDuration = null!;
 	private static ConfigEntry<float> happyBuffStrengthFactor = null!;
 	private static ConfigEntry<float> experienceGainedFactor = null!;
+	private static ConfigEntry<int> experienceLoss = null!;
 
 	private ConfigEntry<T> config<T>(string group, string name, T value, ConfigDescription description, bool synchronizedSetting = true)
 	{
@@ -79,6 +81,9 @@ public class Cooking : BaseUnityPlugin
 		experienceGainedFactor = config("4 - Other", "Skill Experience Gain Factor", 1f, new ConfigDescription("Factor for experience gained for the cooking skill.", new AcceptableValueRange<float>(0.01f, 5f)));
 		experienceGainedFactor.SettingChanged += (_, _) => cooking.SkillGainFactor = experienceGainedFactor.Value;
 		cooking.SkillGainFactor = experienceGainedFactor.Value;
+		experienceLoss = config("4 - Other", "Skill Experience Loss", 5, new ConfigDescription("How much experience to lose in the cooking skill on death.", new AcceptableValueRange<int>(0, 100)));
+		experienceLoss.SettingChanged += (_, _) => cooking.SkillLoss = experienceLoss.Value;
+		cooking.SkillLoss = experienceLoss.Value;
 
 		float oldHealthIncreaseFactor = healthIncreaseFactor.Value;
 		healthIncreaseFactor.SettingChanged += (_, _) =>
