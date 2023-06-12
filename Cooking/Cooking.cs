@@ -19,10 +19,11 @@ namespace Cooking;
 
 [BepInPlugin(ModGUID, ModName, ModVersion)]
 [BepInIncompatibility("randyknapp.mods.extendeditemdataframework")]
+[BepInIncompatibility("org.bepinex.plugins.valheim_plus")]
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.11";
+	private const string ModVersion = "1.1.12";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -81,7 +82,7 @@ public class Cooking : BaseUnityPlugin
 		experienceGainedFactor = config("4 - Other", "Skill Experience Gain Factor", 1f, new ConfigDescription("Factor for experience gained for the cooking skill.", new AcceptableValueRange<float>(0.01f, 5f)));
 		experienceGainedFactor.SettingChanged += (_, _) => cooking.SkillGainFactor = experienceGainedFactor.Value;
 		cooking.SkillGainFactor = experienceGainedFactor.Value;
-		experienceLoss = config("4 - Other", "Skill Experience Loss", 5, new ConfigDescription("How much experience to lose in the cooking skill on death.", new AcceptableValueRange<int>(0, 100)));
+		experienceLoss = config("4 - Other", "Skill Experience Loss", 0, new ConfigDescription("How much experience to lose in the cooking skill on death.", new AcceptableValueRange<int>(0, 100)));
 		experienceLoss.SettingChanged += (_, _) => cooking.SkillLoss = experienceLoss.Value;
 		cooking.SkillLoss = experienceLoss.Value;
 
@@ -163,7 +164,7 @@ public class Cooking : BaseUnityPlugin
 
 		private static void Prefix(long sender)
 		{
-			if (Player.m_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.m_userID == sender) is { } player)
+			if (Player.s_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.ID == sender) is { } player)
 			{
 				cookingPlayer = player;
 			}
@@ -232,7 +233,7 @@ public class Cooking : BaseUnityPlugin
 		{
 			if (item.Data().Get<CookingSkill>()?.happy == true && __result)
 			{
-				__instance.GetSEMan().AddStatusEffect("Happy");
+				__instance.GetSEMan().AddStatusEffect("Happy".GetStableHashCode());
 			}
 		}
 	}
