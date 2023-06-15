@@ -23,7 +23,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.12";
+	private const string ModVersion = "1.1.13";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -164,7 +164,7 @@ public class Cooking : BaseUnityPlugin
 
 		private static void Prefix(long sender)
 		{
-			if (Player.s_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.ID == sender) is { } player)
+			if (Player.s_players.FirstOrDefault(p => p.m_nview.GetZDO().m_uid.UserID == sender) is { } player)
 			{
 				cookingPlayer = player;
 			}
