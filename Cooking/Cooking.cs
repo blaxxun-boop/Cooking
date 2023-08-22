@@ -18,12 +18,11 @@ using Random = UnityEngine.Random;
 namespace Cooking;
 
 [BepInPlugin(ModGUID, ModName, ModVersion)]
-[BepInIncompatibility("randyknapp.mods.extendeditemdataframework")]
 [BepInIncompatibility("org.bepinex.plugins.valheim_plus")]
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.13";
+	private const string ModVersion = "1.1.14";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -54,7 +53,7 @@ public class Cooking : BaseUnityPlugin
 	private enum Toggle
 	{
 		On = 1,
-		Off = 0
+		Off = 0,
 	}
 
 	private class ConfigurationManagerAttributes
@@ -287,7 +286,7 @@ public class Cooking : BaseUnityPlugin
 		}
 	}
 
-	[HarmonyPatch(typeof(ItemDrop.ItemData), nameof(ItemDrop.ItemData.GetTooltip), typeof(ItemDrop.ItemData), typeof(int), typeof(bool))]
+	[HarmonyPatch(typeof(ItemDrop.ItemData), nameof(ItemDrop.ItemData.GetTooltip), typeof(ItemDrop.ItemData), typeof(int), typeof(bool), typeof(float))]
 	public class UpdateFoodDisplay
 	{
 		[UsedImplicitly]
@@ -373,12 +372,14 @@ public class Cooking : BaseUnityPlugin
 	{
 		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
 		{
-			FieldInfo craftsField = AccessTools.DeclaredField(typeof(PlayerProfile.PlayerStats), nameof(PlayerProfile.PlayerStats.m_crafts));
+			MethodInfo statIncrement = AccessTools.DeclaredMethod(typeof(PlayerProfile), nameof(PlayerProfile.IncrementStat));
+			bool first = true;
 			foreach (CodeInstruction instruction in instructions)
 			{
 				yield return instruction;
-				if (instruction.opcode == OpCodes.Stfld && instruction.OperandIs(craftsField))
+				if (first && instruction.Calls(statIncrement))
 				{
+					first = false;
 					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(IncreaseCraftingSkill), nameof(CheckCookingIncrease)));
 				}
 			}
