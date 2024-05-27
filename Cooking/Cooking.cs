@@ -22,7 +22,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.15";
+	private const string ModVersion = "1.1.16";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -71,10 +71,10 @@ public class Cooking : BaseUnityPlugin
 
 		serverConfigLocked = config("1 - General", "Lock Configuration", Toggle.On, "If on, the configuration is locked and can be changed by server admins only.");
 		configSync.AddLockingConfigEntry(serverConfigLocked);
-		healthIncreaseFactor = config("2 - Cooking", "Health Increase Factor", 1.5f, new ConfigDescription("Factor for the health on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
-		staminaIncreaseFactor = config("2 - Cooking", "Stamina Increase Factor", 1.5f, new ConfigDescription("Factor for the stamina on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
-		regenIncreaseFactor = config("2 - Cooking", "Regen Increase Factor", 1.5f, new ConfigDescription("Factor for the health regeneration on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
-		eitrIncreaseFactor = config("2 - Cooking", "Eitr Increase Factor", 1.5f, new ConfigDescription("Factor for the eitr on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		healthIncreaseFactor = config("2 - Cooking", "Health Increase Factor", 1.3f, new ConfigDescription("Factor for the health on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		staminaIncreaseFactor = config("2 - Cooking", "Stamina Increase Factor", 1.3f, new ConfigDescription("Factor for the stamina on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		regenIncreaseFactor = config("2 - Cooking", "Regen Increase Factor", 1.3f, new ConfigDescription("Factor for the health regeneration on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		eitrIncreaseFactor = config("2 - Cooking", "Eitr Increase Factor", 1.3f, new ConfigDescription("Factor for the eitr on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
 		happyMinimumLevel = config("3 - Happy", "Happy Required Level", 50, new ConfigDescription("Minimum required cooking skill level for a chance to cook perfect food. 0 is disabled", new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { ShowRangeAsPercent = false }));
 		happyBuffDuration = config("3 - Happy", "Happy Buff Duration", 3, new ConfigDescription("Duration for the happy buff from eating perfectly cooked food in minutes.", new AcceptableValueRange<int>(1, 60)));
 		happyBuffStrengthFactor = config("3 - Happy", "Happy Buff Strength", 1.1f, new ConfigDescription("Factor for the movement speed with the happy buff active.", new AcceptableValueRange<float>(1f, 3f)));
@@ -280,7 +280,7 @@ public class Cooking : BaseUnityPlugin
 
 	public class IncreaseMovementSpeed : StatusEffect
 	{
-		public override void ModifySpeed(float baseSpeed, ref float speed)
+		public override void ModifySpeed(float baseSpeed, ref float speed, Character character, Vector3 dir)
 		{
 			speed *= happyBuffStrengthFactor.Value;
 		}
