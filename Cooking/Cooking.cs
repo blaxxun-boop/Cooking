@@ -11,7 +11,6 @@ using HarmonyLib;
 using ItemDataManager;
 using JetBrains.Annotations;
 using ServerSync;
-using SkillManager;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -22,7 +21,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.1.16";
+	private const string ModVersion = "1.2.0";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -37,6 +36,11 @@ public class Cooking : BaseUnityPlugin
 	private static ConfigEntry<float> happyBuffStrengthFactor = null!;
 	private static ConfigEntry<float> experienceGainedFactor = null!;
 	private static ConfigEntry<int> experienceLoss = null!;
+	private static ConfigEntry<int> bonusCraftingChance = null!;
+	private static ConfigEntry<int> bonusCraftingAmount = null!;
+	private static ConfigEntry<int> craftingTimeReduction = null!;
+
+	private static Skills.SkillDef? cookingSkill;
 
 	private ConfigEntry<T> config<T>(string group, string name, T value, ConfigDescription description, bool synchronizedSetting = true)
 	{
@@ -63,27 +67,41 @@ public class Cooking : BaseUnityPlugin
 
 	public void Awake()
 	{
-		Skill cooking = new("Cooking", "cooking.png");
-		cooking.Description.English("Increases health, stamina and health regen for food you cook.");
-		cooking.Name.German("Kochen");
-		cooking.Description.German("Erhöht die Lebenspunkte, Ausdauer und Lebenspunkteregeneration für von dir gekochtes Essen.");
-		cooking.Configurable = false;
-
 		serverConfigLocked = config("1 - General", "Lock Configuration", Toggle.On, "If on, the configuration is locked and can be changed by server admins only.");
 		configSync.AddLockingConfigEntry(serverConfigLocked);
 		healthIncreaseFactor = config("2 - Cooking", "Health Increase Factor", 1.3f, new ConfigDescription("Factor for the health on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
 		staminaIncreaseFactor = config("2 - Cooking", "Stamina Increase Factor", 1.3f, new ConfigDescription("Factor for the stamina on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
 		regenIncreaseFactor = config("2 - Cooking", "Regen Increase Factor", 1.3f, new ConfigDescription("Factor for the health regeneration on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
 		eitrIncreaseFactor = config("2 - Cooking", "Eitr Increase Factor", 1.3f, new ConfigDescription("Factor for the eitr on food items at skill level 100.", new AcceptableValueRange<float>(1f, 5f)));
+		bonusCraftingChance = config("2 - Cooking", "Bonus Crafting Chance", 0, new ConfigDescription("Chance to craft additional food items at skill level 100. Vanilla uses 25%.", new AcceptableValueRange<int>(0, 100)));
+		bonusCraftingChance.SettingChanged += (_, _) =>
+		{
+			if (InventoryGui.instance is { } gui)
+			{
+				gui.m_craftCookingBonusChance = bonusCraftingChance.Value / 100f;
+			}
+		};
+		bonusCraftingAmount = config("2 - Cooking", "Bonus Crafting Amount", 1, new ConfigDescription("Additional items to be crafted when the bonus crafting chance triggers.", new AcceptableValueRange<int>(1, 10)));
+		bonusCraftingAmount.SettingChanged += (_, _) =>
+		{
+			if (InventoryGui.instance is { } gui)
+			{
+				gui.m_craftCookingBonusAmount = bonusCraftingAmount.Value;
+			}
+		};
+		craftingTimeReduction = config("2 - Cooking", "Crafting Time Reduction", 30, new ConfigDescription("Time reduction to craft food items at skill level 100. Vanilla uses 60%.", new AcceptableValueRange<int>(0, 100)));
 		happyMinimumLevel = config("3 - Happy", "Happy Required Level", 50, new ConfigDescription("Minimum required cooking skill level for a chance to cook perfect food. 0 is disabled", new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { ShowRangeAsPercent = false }));
 		happyBuffDuration = config("3 - Happy", "Happy Buff Duration", 3, new ConfigDescription("Duration for the happy buff from eating perfectly cooked food in minutes.", new AcceptableValueRange<int>(1, 60)));
 		happyBuffStrengthFactor = config("3 - Happy", "Happy Buff Strength", 1.1f, new ConfigDescription("Factor for the movement speed with the happy buff active.", new AcceptableValueRange<float>(1f, 3f)));
 		experienceGainedFactor = config("4 - Other", "Skill Experience Gain Factor", 1f, new ConfigDescription("Factor for experience gained for the cooking skill.", new AcceptableValueRange<float>(0.01f, 5f)));
-		experienceGainedFactor.SettingChanged += (_, _) => cooking.SkillGainFactor = experienceGainedFactor.Value;
-		cooking.SkillGainFactor = experienceGainedFactor.Value;
+		experienceGainedFactor.SettingChanged += (_, _) =>
+		{
+			if (cookingSkill is not null)
+			{
+				cookingSkill.m_increseStep = experienceGainedFactor.Value;
+			}
+		};
 		experienceLoss = config("4 - Other", "Skill Experience Loss", 0, new ConfigDescription("How much experience to lose in the cooking skill on death.", new AcceptableValueRange<int>(0, 100)));
-		experienceLoss.SettingChanged += (_, _) => cooking.SkillLoss = experienceLoss.Value;
-		cooking.SkillLoss = experienceLoss.Value;
 
 		float oldHealthIncreaseFactor = healthIncreaseFactor.Value;
 		healthIncreaseFactor.SettingChanged += (_, _) =>
@@ -135,12 +153,29 @@ public class Cooking : BaseUnityPlugin
 		ItemInfo.ForceLoadTypes.Add(typeof(CookingSkill));
 	}
 
+	[HarmonyPatch(typeof(Skills), nameof(Skills.Awake))]
+	private static class ReplaceSkillIcon
+	{
+		private static void Postfix(Skills __instance)
+		{
+			foreach (Skills.SkillDef skill in __instance.m_skills)
+			{
+				if (skill.m_skill == Skills.SkillType.Cooking)
+				{
+					cookingSkill = skill;
+					skill.m_icon = loadSprite("cooking.png", 64, 64);
+					skill.m_increseStep = experienceGainedFactor.Value;
+				}
+			}
+		}
+	}
+
 	[HarmonyPatch(typeof(Player), nameof(Player.Awake))]
 	public class PlayerAwake
 	{
 		private static void Postfix(Player __instance)
 		{
-			__instance.m_nview.Register("Cooking IncreaseSkill", (long _, int factor) => __instance.RaiseSkill("Cooking", factor));
+			__instance.m_nview.Register("Cooking IncreaseSkill", (long _, int factor) => __instance.RaiseSkill(Skills.SkillType.Cooking, factor));
 		}
 	}
 
@@ -151,8 +186,36 @@ public class Cooking : BaseUnityPlugin
 		{
 			if (__instance == Player.m_localPlayer)
 			{
-				__instance.m_nview.GetZDO().Set("Cooking Skill Factor", __instance.GetSkillFactor(Skill.fromName("Cooking")));
+				__instance.m_nview.GetZDO().Set("Cooking Skill Factor", __instance.GetSkillFactor(Skills.SkillType.Cooking));
 			}
+		}
+	}
+
+	[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.Awake))]
+	private static class SetCraftBonus
+	{
+		private static void Prefix(InventoryGui __instance)
+		{
+			__instance.m_craftCookingBonusAmount = bonusCraftingAmount.Value;
+			__instance.m_craftCookingBonusChance = bonusCraftingChance.Value / 100f;
+		}
+	}
+
+	[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.UpdateRecipe))]
+	private static class ModifyCraftDuration
+	{
+		private static void Prefix(InventoryGui __instance, Player player, out float __state)
+		{
+			__state = __instance.m_craftDurationSkillMaxDecrease;
+			if (player.GetCurrentCraftingStation()?.m_craftingSkill == Skills.SkillType.Cooking)
+			{
+				__instance.m_craftDurationSkillMaxDecrease = craftingTimeReduction.Value / 100f;
+			}
+		}
+
+		private static void Finalizer(InventoryGui __instance, float __state)
+		{
+			__instance.m_craftDurationSkillMaxDecrease = __state;
 		}
 	}
 
@@ -286,7 +349,7 @@ public class Cooking : BaseUnityPlugin
 		}
 	}
 
-	[HarmonyPatch(typeof(ItemDrop.ItemData), nameof(ItemDrop.ItemData.GetTooltip), typeof(ItemDrop.ItemData), typeof(int), typeof(bool), typeof(float))]
+	[HarmonyPatch(typeof(ItemDrop.ItemData), nameof(ItemDrop.ItemData.GetTooltip), typeof(ItemDrop.ItemData), typeof(int), typeof(bool), typeof(float), typeof(int))]
 	public class UpdateFoodDisplay
 	{
 		[UsedImplicitly]
@@ -294,7 +357,7 @@ public class Cooking : BaseUnityPlugin
 		{
 			if (crafting && item.m_shared.m_food > 0 && item.m_shared.m_foodStamina > 0)
 			{
-				float skill = Mathf.RoundToInt(Player.m_localPlayer.GetSkillFactor(Skill.fromName("Cooking")) * 100 / 5) * 5f / 100;
+				float skill = Mathf.RoundToInt(Player.m_localPlayer.GetSkillFactor(Skills.SkillType.Cooking) * 100 / 5) * 5f / 100;
 				if (skill > 0)
 				{
 					__result = new Regex("(\\$item_food_health.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_food * (healthIncreaseFactor.Value - 1))}</color>)");
@@ -367,29 +430,28 @@ public class Cooking : BaseUnityPlugin
 		}
 	}
 
-	[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.DoCrafting))]
-	public class IncreaseCraftingSkill
+	[HarmonyPatch(typeof(Skills), nameof(Skills.OnDeath))]
+	public class ChangeSkillLoss
 	{
-		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+		private static void Prefix(Skills __instance, ref Skills.Skill? __state)
 		{
-			MethodInfo statIncrement = AccessTools.DeclaredMethod(typeof(PlayerProfile), nameof(PlayerProfile.IncrementStat));
-			bool first = true;
-			foreach (CodeInstruction instruction in instructions)
+			if (__instance.m_skillData.TryGetValue(Skills.SkillType.Cooking, out Skills.Skill skill))
 			{
-				yield return instruction;
-				if (first && instruction.Calls(statIncrement))
+				__state = skill;
+				if (experienceLoss.Value > 0)
 				{
-					first = false;
-					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(IncreaseCraftingSkill), nameof(CheckCookingIncrease)));
+					skill.m_level -= skill.m_level * experienceLoss.Value / 100f;
+					skill.m_accumulator = 0.0f;
 				}
+				__instance.m_skillData.Remove(Skills.SkillType.Cooking);
 			}
 		}
 
-		private static void CheckCookingIncrease()
+		private static void Finalizer(Skills __instance, ref Skills.Skill? __state)
 		{
-			if (InventoryGui.instance.m_craftRecipe.m_item.m_itemData.Data().Get<CookingSkill>() is not null)
+			if (__state is not null)
 			{
-				Player.m_localPlayer.RaiseSkill("Cooking", 5f);
+				__instance.m_skillData[Skills.SkillType.Cooking] = __state;
 			}
 		}
 	}
@@ -445,5 +507,48 @@ public class Cooking : BaseUnityPlugin
 		}
 
 		protected override bool AllowStackingIdenticalValues { get; set; } = true;
+	}
+
+	[HarmonyPatch(typeof(CookingStation), nameof(CookingStation.OnInteract))]
+	private static class SkipCookingStationRaiseSkill
+	{
+		private static readonly MethodInfo raiseSkill = AccessTools.DeclaredMethod(typeof(Character), nameof(Character.RaiseSkill));
+
+		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+		{
+			foreach (CodeInstruction instruction in instructions)
+			{
+				if (instruction.Calls(raiseSkill))
+				{
+					yield return new CodeInstruction(OpCodes.Pop);
+					yield return new CodeInstruction(OpCodes.Pop);
+					yield return new CodeInstruction(OpCodes.Pop);
+				}
+				else
+				{
+					yield return instruction;
+				}
+			}
+		}
+	}
+
+	[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.DoCrafting))]
+	private static class IncreaseCraftingSkill
+	{
+		private static float ModifyBaseCraftIncrease(float skill) => skill * (InventoryGui.instance.m_craftRecipe.m_craftingStation.m_craftingSkill == Skills.SkillType.Cooking ? 5 : 1);
+
+		private static readonly MethodInfo raiseSkill = AccessTools.DeclaredMethod(typeof(Character), nameof(Character.RaiseSkill));
+
+		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+		{
+			foreach (CodeInstruction instruction in instructions)
+			{
+				if (instruction.Calls(raiseSkill))
+				{
+					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(IncreaseCraftingSkill), nameof(ModifyBaseCraftIncrease)));
+				}
+				yield return instruction;
+			}
+		}
 	}
 }

@@ -75,9 +75,6 @@
         <Reference Include="ServerSync, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
             <HintPath>Libs\ServerSync.dll</HintPath>
         </Reference>
-        <Reference Include="SkillManager, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
-            <HintPath>Libs\SkillManager.dll</HintPath>
-        </Reference>
         <Reference Include="System"/>
         <Reference Include="System.Core"/>
         <Reference Include="System.Data"/>
@@ -102,9 +99,6 @@
         <Content Include="ILRepack.targets"/>
         <Content Include="Libs\ItemDataManager.dll"/>
         <Content Include="Libs\ServerSync.dll">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </Content>
-        <Content Include="Libs\SkillManager.dll">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
     </ItemGroup>
