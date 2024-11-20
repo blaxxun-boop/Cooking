@@ -21,7 +21,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.2.0";
+	private const string ModVersion = "1.2.1";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -39,6 +39,7 @@ public class Cooking : BaseUnityPlugin
 	private static ConfigEntry<int> bonusCraftingChance = null!;
 	private static ConfigEntry<int> bonusCraftingAmount = null!;
 	private static ConfigEntry<int> craftingTimeReduction = null!;
+	private static ConfigEntry<int> cookingSkillInterval = null!;
 
 	private static Skills.SkillDef? cookingSkill;
 
@@ -78,7 +79,7 @@ public class Cooking : BaseUnityPlugin
 		{
 			if (InventoryGui.instance is { } gui)
 			{
-				gui.m_craftCookingBonusChance = bonusCraftingChance.Value / 100f;
+				gui.m_craftBonusChance = bonusCraftingChance.Value / 100f;
 			}
 		};
 		bonusCraftingAmount = config("2 - Cooking", "Bonus Crafting Amount", 1, new ConfigDescription("Additional items to be crafted when the bonus crafting chance triggers.", new AcceptableValueRange<int>(1, 10)));
@@ -86,10 +87,11 @@ public class Cooking : BaseUnityPlugin
 		{
 			if (InventoryGui.instance is { } gui)
 			{
-				gui.m_craftCookingBonusAmount = bonusCraftingAmount.Value;
+				gui.m_craftBonusAmount = bonusCraftingAmount.Value;
 			}
 		};
 		craftingTimeReduction = config("2 - Cooking", "Crafting Time Reduction", 30, new ConfigDescription("Time reduction to craft food items at skill level 100. Vanilla uses 60%.", new AcceptableValueRange<int>(0, 100)));
+		cookingSkillInterval = config("2 - Cooking", "Cooking Skill Interval", 5, new ConfigDescription("Cooking skill level difference needed before food stops stacking with each other.", new AcceptableValueRange<int>(1, 50)));
 		happyMinimumLevel = config("3 - Happy", "Happy Required Level", 50, new ConfigDescription("Minimum required cooking skill level for a chance to cook perfect food. 0 is disabled", new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { ShowRangeAsPercent = false }));
 		happyBuffDuration = config("3 - Happy", "Happy Buff Duration", 3, new ConfigDescription("Duration for the happy buff from eating perfectly cooked food in minutes.", new AcceptableValueRange<int>(1, 60)));
 		happyBuffStrengthFactor = config("3 - Happy", "Happy Buff Strength", 1.1f, new ConfigDescription("Factor for the movement speed with the happy buff active.", new AcceptableValueRange<float>(1f, 3f)));
@@ -196,8 +198,8 @@ public class Cooking : BaseUnityPlugin
 	{
 		private static void Prefix(InventoryGui __instance)
 		{
-			__instance.m_craftCookingBonusAmount = bonusCraftingAmount.Value;
-			__instance.m_craftCookingBonusChance = bonusCraftingChance.Value / 100f;
+			__instance.m_craftBonusAmount = bonusCraftingAmount.Value;
+			__instance.m_craftBonusChance = bonusCraftingChance.Value / 100f;
 		}
 	}
 
@@ -241,7 +243,7 @@ public class Cooking : BaseUnityPlugin
 		if (item.m_itemData.m_shared.m_food > 0 && item.m_itemData.m_shared.m_foodStamina > 0)
 		{
 			CookingSkill skill = item.m_itemData.Data().Add<CookingSkill>()!;
-			skill.skill = Mathf.RoundToInt(cook.m_nview.GetZDO().GetFloat("Cooking Skill Factor") * 100 / 5) * 5;
+			skill.skill = Mathf.RoundToInt(cook.m_nview.GetZDO().GetFloat("Cooking Skill Factor") * 100 / cookingSkillInterval.Value) * cookingSkillInterval.Value;
 			if (happyMinimumLevel.Value > 0 && Random.Range(0, 100) <= skill.skill - happyMinimumLevel.Value)
 			{
 				skill.happy = true;
