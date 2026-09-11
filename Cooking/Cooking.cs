@@ -21,7 +21,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.2.2";
+	private const string ModVersion = "1.2.3";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -240,7 +240,8 @@ public class Cooking : BaseUnityPlugin
 
 	private static void AttachCooking(ItemDrop item, Player cook)
 	{
-		if (item.m_itemData.m_shared.m_food > 0 && item.m_itemData.m_shared.m_foodStamina > 0)
+		ItemDrop.ItemData.SharedData actualFood = item.m_itemData.m_shared.m_appendToolTip?.m_itemData.m_shared ?? item.m_itemData.m_shared;
+		if (actualFood.m_food > 0 && actualFood.m_foodStamina > 0)
 		{
 			CookingSkill skill = item.m_itemData.Data().Add<CookingSkill>()!;
 			skill.skill = Mathf.RoundToInt(cook.m_nview.GetZDO().GetFloat("Cooking Skill Factor") * 100 / cookingSkillInterval.Value) * cookingSkillInterval.Value;
@@ -301,7 +302,7 @@ public class Cooking : BaseUnityPlugin
 			}
 		}
 	}
-
+	
 	[HarmonyPatch(typeof(ObjectDB), nameof(ObjectDB.Awake))]
 	public class AddStatusEffect
 	{
@@ -323,6 +324,68 @@ public class Cooking : BaseUnityPlugin
 			{
 				happy.m_tooltip = $"You ate a perfect meal. Your movement speed is increased by {(happyBuffStrengthFactor.Value - 1) * 100}%.";
 				happy.m_ttl = happyBuffDuration.Value * 60f;
+			}
+		}
+	}
+	
+	class CookingFeast : MonoBehaviour, IPlaced
+	{
+		public string SkillData = "";
+		
+		public void OnPlaced()
+		{
+			if (Player.m_localPlayer is { } player)
+			{
+				Piece.Requirement[] requirements = GetComponent<Piece>().m_resources;
+				if (requirements.Length > 0 && requirements[0].m_resItem is not null)
+				{
+					if (player.GetInventory().GetItem(requirements[0].m_resItem.m_itemData.m_shared.m_name)?.Data().Get<CookingSkill>() is {} cookingSkill)
+					{
+						GetComponent<ZNetView>().GetZDO().Set("Cooking SkillData", SkillData = cookingSkill.Value);
+					}
+				}
+			}
+		}
+
+		public void Start()
+		{
+			if (GetComponent<ZNetView>() is {} nview && nview.GetZDO() is { } zdo)
+			{
+				SkillData = zdo.GetString("Cooking SkillData");
+
+				Action<long> original = ((RoutedMethod)nview.m_functions["RPC_EatConfirmation".GetStableHashCode()]).m_action;
+				nview.Unregister("RPC_EatConfirmation"); 
+				nview.Register("RPC_EatConfirmation", sender =>
+				{
+					if (SkillData != "")
+					{
+						CookingSkill skill = GetComponent<Feast>().m_foodItem.m_itemData.Data().GetOrCreate<CookingSkill>();
+						skill.Value = SkillData;
+						skill.Load();
+						original(sender);
+						skill.Unload();
+					}
+					else
+					{
+						original(sender);
+					}
+				});
+			}
+		}
+	}
+
+	[HarmonyPatch(typeof(ZNetScene), nameof(ZNetScene.Awake))]
+	public class AddCookingFeastComponent
+	{
+		[HarmonyPriority(Priority.Last)]
+		private static void Postfix(ZNetScene __instance)
+		{
+			foreach (GameObject prefab in __instance.m_prefabs)
+			{
+				if (prefab.GetComponent<Feast>() is { } feast && !feast.GetComponent<CookingFeast>())
+				{
+					prefab.AddComponent<CookingFeast>();
+				}
 			}
 		}
 	}
@@ -351,23 +414,24 @@ public class Cooking : BaseUnityPlugin
 		}
 	}
 
-	[HarmonyPatch(typeof(ItemDrop.ItemData), nameof(ItemDrop.ItemData.GetTooltip), typeof(ItemDrop.ItemData), typeof(int), typeof(bool), typeof(float), typeof(int))]
+	[HarmonyPatch(typeof(ItemDrop.ItemData), nameof(ItemDrop.ItemData.GetTooltip), typeof(ItemDrop.ItemData), typeof(int), typeof(bool), typeof(float), typeof(int), typeof(bool))]
 	public class UpdateFoodDisplay
 	{
 		[UsedImplicitly]
 		public static void Postfix(ItemDrop.ItemData item, bool crafting, ref string __result)
 		{
-			if (crafting && item.m_shared.m_food > 0 && item.m_shared.m_foodStamina > 0)
+			ItemDrop.ItemData.SharedData actualFood = item.m_shared.m_appendToolTip?.m_itemData.m_shared ?? item.m_shared;
+			if ((crafting || item.m_shared.m_appendToolTip) && actualFood.m_food > 0 && actualFood.m_foodStamina > 0)
 			{
-				float skill = Mathf.RoundToInt(Player.m_localPlayer.GetSkillFactor(Skills.SkillType.Cooking) * 100 / 5) * 5f / 100;
+				float skill = (crafting ? Mathf.RoundToInt(Player.m_localPlayer.GetSkillFactor(Skills.SkillType.Cooking) * 100 / 5) * 5f : item.Data().Get<CookingSkill>()?.skill ?? 0) / 100;
 				if (skill > 0)
 				{
-					__result = new Regex("(\\$item_food_health.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_food * (healthIncreaseFactor.Value - 1))}</color>)");
-					__result = new Regex("(\\$item_food_stamina.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodStamina * (staminaIncreaseFactor.Value - 1))}</color>)");
-					__result = new Regex("(\\$item_food_regen.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodRegen * (regenIncreaseFactor.Value - 1))}</color>)");
-					if (item.m_shared.m_foodEitr > 0)
+					__result = new Regex("(\\$item_food_health.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * actualFood.m_food * (healthIncreaseFactor.Value - 1))}</color>)");
+					__result = new Regex("(\\$item_food_stamina.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * actualFood.m_foodStamina * (staminaIncreaseFactor.Value - 1))}</color>)");
+					__result = new Regex("(\\$item_food_regen.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * actualFood.m_foodRegen * (regenIncreaseFactor.Value - 1))}</color>)");
+					if (actualFood.m_foodEitr > 0)
 					{
-						__result = new Regex("(\\$item_food_eitr.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * item.m_shared.m_foodEitr * (eitrIncreaseFactor.Value - 1))}</color>)");
+						__result = new Regex("(\\$item_food_eitr.*?</color>)").Replace(__result, $"$1 (<color=orange>+{Mathf.Round(skill * actualFood.m_foodEitr * (eitrIncreaseFactor.Value - 1))}</color>)");
 					}
 				}
 			}
