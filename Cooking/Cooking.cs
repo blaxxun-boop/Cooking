@@ -21,7 +21,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.2.3";
+	private const string ModVersion = "1.2.4";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -614,6 +614,28 @@ public class Cooking : BaseUnityPlugin
 					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(IncreaseCraftingSkill), nameof(ModifyBaseCraftIncrease)));
 				}
 				yield return instruction;
+			}
+		}
+	}
+	
+	[HarmonyPatch(typeof(Player), nameof(Player.EatFood))]
+	private static class RoundFoodValues
+	{
+		private static readonly MethodInfo toString = AccessTools.DeclaredMethod(typeof(float), nameof(float.ToString), []);
+		
+		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+		{
+			foreach (CodeInstruction instruction in instructions)
+			{
+				if (instruction.Calls(toString))
+				{
+					yield return new CodeInstruction(OpCodes.Ldstr, "0.##");
+					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(float), nameof(float.ToString), [typeof(string)]));
+				}
+				else
+				{
+					yield return instruction;
+				}
 			}
 		}
 	}
