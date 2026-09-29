@@ -21,7 +21,7 @@ namespace Cooking;
 public class Cooking : BaseUnityPlugin
 {
 	private const string ModName = "Cooking";
-	private const string ModVersion = "1.2.4";
+	private const string ModVersion = "1.2.5";
 	private const string ModGUID = "org.bepinex.plugins.cooking";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -262,8 +262,11 @@ public class Cooking : BaseUnityPlugin
 		{
 			__state = ObjectDB.instance.GetItemPrefab(name).GetComponent<ItemDrop>();
 			// ReSharper disable once Unity.NoNullCoalescing
-			AttachCooking(__state, OnCookingDoneItems.cookingPlayer ?? Player.m_localPlayer);
-			OnCookingDoneItems.cookingPlayer?.m_nview.InvokeRPC("Cooking IncreaseSkill", 5);
+			if (__state.m_itemData.m_shared.m_food > 0 || __state.m_itemData.m_shared.m_foodStamina > 0 || __state.m_itemData.m_shared.m_foodEitr > 0)
+			{
+				AttachCooking(__state, OnCookingDoneItems.cookingPlayer ?? Player.m_localPlayer);
+				OnCookingDoneItems.cookingPlayer?.m_nview.InvokeRPC("Cooking IncreaseSkill", 5);
+			}
 		}
 
 		private static void Finalizer(ItemDrop __state)
